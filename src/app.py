@@ -2,9 +2,11 @@
 This module takes care of starting the API Server, Loading the DB and Adding the endpoints
 """
 import os
+import datetime
 from flask import Flask, request, jsonify, url_for, send_from_directory
 from flask_migrate import Migrate
 from flask_swagger import swagger
+from flask_jwt_extended import JWTManager
 from api.utils import APIException, generate_sitemap
 from api.models import db
 from api.routes import api
@@ -28,6 +30,16 @@ else:
     app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:////tmp/test.db"
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+#JWT Configuración
+app.config['JWT_SECRET_KEY'] = os.getenv('FLASK_APP_KEY', 'tu_clave_secreta_por_defecto')
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=1)
+app.config['JWT_TOKEN_LOCATION'] = ['headers']
+app.config['JWT_HEADER_NAME'] = 'Authorization'
+app.config['JWT_HEADER_TYPE'] = 'Bearer'
+
+jwt = JWTManager(app)
+
 MIGRATE = Migrate(app, db, compare_type=True)
 db.init_app(app)
 
@@ -47,8 +59,32 @@ app.register_blueprint(api, url_prefix='/api')
 def handle_invalid_usage(error):
     return jsonify(error.to_dict()), error.status_code
 
-# generate sitemap with all your endpoints
+# JWT Error Handlers
+@jwt.expired_token_loader
+def expired_token_callback(jwt_header, jwt_payload):
+    return jsonify({
+        'message': 'Tu sesión ha expirado. Por favor, inicia sesión nuevamente.',
+        'error_code': 'TOKEN_EXPIRED',
+        'redirect_to': '/api/login'
+    }), 401
 
+@jwt.invalid_token_loader
+def invalid_token_callback(error):
+    return jsonify({
+        'message': 'Token de acceso inválido. Por favor, inicia sesión nuevamente.',
+        'error_code': 'INVALID_TOKEN',
+        'redirect_to': '/api/login'
+    }), 401
+
+@jwt.unauthorized_loader
+def missing_token_callback(error):
+    return jsonify({
+        'message': 'Se requiere autenticación para acceder a este recurso.',
+        'error_code': 'TOKEN_MISSING',
+        'redirect_to': '/api/login'
+    }), 401
+
+# generate sitemap with all your endpoints
 
 @app.route('/')
 def sitemap():
